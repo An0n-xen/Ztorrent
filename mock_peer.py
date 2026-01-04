@@ -45,6 +45,7 @@ def start_mock_peer():
     # ID = 5
     # Payload = 0xFF
     bitfield_msg = struct.pack('>IBB', 2, 5, 0xFF)
+    # bitfield_msg = struct.pack('>IBB', 2, 5, 0xAA)
     conn.send(bitfield_msg)
     print("[MOCK PEER] Sent Bitfield (I have all pieces).")
 

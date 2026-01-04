@@ -11,6 +11,7 @@ class PeerConnection:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(5)    # Don't hang forever
         self.buffer = b""          # Our stream buffer
+        self.available_pieces = set() # We use a Set for fast lookups
 
     def connect(self):
         try:
@@ -114,12 +115,34 @@ class PeerConnection:
             # Have message: payload contains the piece index they have
             piece_index = struct.unpack('>I', payload)[0]
             print(f"Received: Have piece {piece_index}")
+            self.available_pieces.add(piece_index)
         elif msg_id == 5:
             print("Received: Bitfield (Map of all pieces they have)")
+            self.parse_bitfield(payload)
+            print(f"Peer has {len(self.available_pieces)} pieces.")
         elif msg_id == 7:
             print("Received: Piece Data! (We got a block)")
         else:
             print(f"Received: Message ID {msg_id}")
+
+    def parse_bitfield(self, payload):
+        self.available_pieces.clear() # Reset
+        
+        # Iterate through every byte in the payload
+        for i, byte_val in enumerate(payload):
+            # For each byte, check all 8 bits
+            for bit_rank in range(8):
+                # Check if the bit at 'bit_rank' is set (1)
+                # We check from left (high) to right (low)
+                # 1 << 7 is 10000000
+                # 1 << 6 is 01000000
+                mask = 1 << (7 - bit_rank)
+                
+                if byte_val & mask:
+                    # Calculate the actual piece index
+                    piece_index = (i * 8) + bit_rank
+                    self.available_pieces.add(piece_index)
+                    
 
 # --- Usage Mockup ---
 # To test this, you need a real Info Hash from a real .torrent file
