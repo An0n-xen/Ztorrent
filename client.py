@@ -3,6 +3,8 @@ import struct
 import time
 
 class PeerConnection:
+    BLOCK_SIZE = 16384 # 16KB standard request size
+
     def __init__(self, ip, port, info_hash, peer_id):
         self.ip = ip
         self.port = port
@@ -110,7 +112,12 @@ class PeerConnection:
         if msg_id == 0:
             print("Received: Choke (Peer won't upload to us)")
         elif msg_id == 1:
-            print("Received: Unchoke (We can request data!)")
+            print("Received: Unchoke. Ready to request!")
+            # TRIGGER: Immediately ask for the first block of Piece 0
+            if 0 in self.available_pieces:
+                self.send_request(0, 0, self.BLOCK_SIZE)
+            else:
+                print("Peer doesn't have Piece 0. Nothing to request.")
         elif msg_id == 4:
             # Have message: payload contains the piece index they have
             piece_index = struct.unpack('>I', payload)[0]
@@ -121,7 +128,14 @@ class PeerConnection:
             self.parse_bitfield(payload)
             print(f"Peer has {len(self.available_pieces)} pieces.")
         elif msg_id == 7:
-            print("Received: Piece Data! (We got a block)")
+            # Piece Message: Index(4) + Begin(4) + Data(Variable)
+            piece_index = struct.unpack('>I', payload[0:4])[0]
+            begin_offset = struct.unpack('>I', payload[4:8])[0]
+            block_data = payload[8:]
+            
+            print(f"SUCCESS! Received Block: Piece {piece_index} @ {begin_offset}")
+            print(f"Data Length: {len(block_data)} bytes")
+            print(f"First 20 bytes: {block_data[:20]}")
         else:
             print(f"Received: Message ID {msg_id}")
 
@@ -143,6 +157,15 @@ class PeerConnection:
                     piece_index = (i * 8) + bit_rank
                     self.available_pieces.add(piece_index)
                     
+    def send_request(self, piece_index, block_offset, block_length):
+        # ID = 6 (Request)
+        # Payload = Index (4 bytes) + Begin (4 bytes) + Length (4 bytes)
+        req_payload = struct.pack('>III', piece_index, block_offset, block_length)
+        
+        # Message Length = 1 (ID) + 12 (Payload) = 13
+        msg = struct.pack('>IB', 13, 6) + req_payload
+        self.sock.send(msg)
+        print(f"Sent Request: Piece {piece_index}, Offset {block_offset}, Len {block_length}")
 
 # --- Usage Mockup ---
 # To test this, you need a real Info Hash from a real .torrent file
