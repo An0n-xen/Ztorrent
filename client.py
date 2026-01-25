@@ -6,7 +6,7 @@ from file_manager import FileManager, create_empty_file
 class PeerConnection:
     BLOCK_SIZE = 16384 # 16KB standard request size
 
-    def __init__(self, ip, port, info_hash, peer_id, file_manager):
+    def __init__(self, ip, port, info_hash, peer_id, file_manager, total_pieces, piece_length):
         self.ip = ip
         self.port = port
         self.info_hash = info_hash # Expecting bytes, not hex string
@@ -15,8 +15,16 @@ class PeerConnection:
         self.sock.settimeout(5)    # Don't hang forever
         self.buffer = b""          # Our stream buffer
         self.available_pieces = set() # We use a Set for fast lookups
+
         self.file_manager = file_manager
-        self.block_size = 16384
+
+        self.total_pieces = total_pieces
+        self.piece_length = piece_length
+        self.current_piece = 0
+        self.current_offset = 0
+
+        self.am_choked = True
+
 
     def connect(self):
         try:
@@ -66,6 +74,23 @@ class PeerConnection:
             
         return response
 
+    def request_next_block(self):
+        if self.am_choked:
+            return 
+        
+        # Check if we have finished all pieces
+        if self.current_piece >= self.total_pieces:
+            return 
+
+        # Check if peer actuall Has this piece
+        if self.current_piece not in self.available_pieces:
+            print(f"Peer doesn't have Piece {self.current_piece}. Waiting...")
+            return 
+
+        # Send the request
+        self.send_request(self.current_piece, self.current_offset, self.BLOCK_SIZE) 
+
+
     def message_loop(self):
         while True:
             # Receive data and add to buffer
@@ -114,18 +139,22 @@ class PeerConnection:
         # Standard BitTorrent Message IDs
         if msg_id == 0:
             print("Received: Choke (Peer won't upload to us)")
+            self.am_choked = True
+
         elif msg_id == 1:
             print("Received: Unchoke. Ready to request!")
-            # TRIGGER: Immediately ask for the first block of Piece 0
-            if 0 in self.available_pieces:
-                self.send_request(0, 0, self.BLOCK_SIZE)
-            else:
-                print("Peer doesn't have Piece 0. Nothing to request.")
+            self.am_choked = False
+            self.request_next_block()
+
         elif msg_id == 4:
             # Have message: payload contains the piece index they have
             piece_index = struct.unpack('>I', payload)[0]
             print(f"Received: Have piece {piece_index}")
             self.available_pieces.add(piece_index)
+
+            if piece_index == self.current_piece:
+                self.request_next_block()
+
         elif msg_id == 5:
             print("Received: Bitfield (Map of all pieces they have)")
             self.parse_bitfield(payload)
@@ -142,6 +171,17 @@ class PeerConnection:
 
             # Write to disk!
             self.file_manager.write_block(piece_index, begin_offset, block_data)
+
+            # 3. ADVANCE THE CURSOR
+            self.current_offset += len(block_data)
+
+            if self.current_offset >= self.piece_length:
+                print(f"--- Finished Piece {self.current_piece} ---")
+                self.current_piece += 1
+                self.current_offset = 0
+
+            # 5. TRIGGER NEXT REQUEST
+            self.request_next_block()   
         else:
             print(f"Received: Message ID {msg_id}")
 
@@ -173,15 +213,13 @@ class PeerConnection:
         self.sock.send(msg)
         print(f"Sent Request: Piece {piece_index}, Offset {block_offset}, Len {block_length}")
 
-# 1. Define the constants from your torrent file (Mock values for now)
-PIECE_LENGTH = 256 * 1024  # 256KB (Standard size)
-TOTAL_FILE_SIZE = PIECE_LENGTH * 8 # Let's pretend the file is 8 pieces long
-OUTPUT_FILE = "downloaded_file.dat"
-
-
 # --- Usage Mockup ---
 # To test this, you need a real Info Hash from a real .torrent file
 if __name__ == "__main__":
+    PIECE_LENGTH = 256 * 1024  # 256KB
+    TOTAL_PIECES = 8           # We want 8 pieces total
+    TOTAL_FILE_SIZE = PIECE_LENGTH * TOTAL_PIECES
+    OUTPUT_FILE = "downloaded_file.dat"
 
     # Create the empty file first
     create_empty_file(OUTPUT_FILE, TOTAL_FILE_SIZE)
@@ -194,5 +232,5 @@ if __name__ == "__main__":
     my_peer_id = b'-PC0001-999999999999'
     
     # Connect to localhost
-    peer = PeerConnection('127.0.0.1', 6881, fake_info_hash, my_peer_id, file_manager)
+    peer = PeerConnection('127.0.0.1', 6881, fake_info_hash, my_peer_id, file_manager, TOTAL_PIECES, PIECE_LENGTH)
     peer.connect()
