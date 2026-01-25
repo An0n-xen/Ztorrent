@@ -34,8 +34,10 @@ def start_mock_peer():
             # Read header (4 bytes length)
             header = conn.recv(4)
             if not header: break
-            
+            print("Header received.", header)
+
             msg_len = struct.unpack('>I', header)[0]
+            print("msg_len", msg_len)
             # Read rest of message
             msg_body = conn.recv(msg_len)
             

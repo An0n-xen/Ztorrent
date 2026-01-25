@@ -1,11 +1,12 @@
 import socket
 import struct
 import time
+from file_manager import FileManager, create_empty_file
 
 class PeerConnection:
     BLOCK_SIZE = 16384 # 16KB standard request size
 
-    def __init__(self, ip, port, info_hash, peer_id):
+    def __init__(self, ip, port, info_hash, peer_id, file_manager):
         self.ip = ip
         self.port = port
         self.info_hash = info_hash # Expecting bytes, not hex string
@@ -14,6 +15,8 @@ class PeerConnection:
         self.sock.settimeout(5)    # Don't hang forever
         self.buffer = b""          # Our stream buffer
         self.available_pieces = set() # We use a Set for fast lookups
+        self.file_manager = file_manager
+        self.block_size = 16384
 
     def connect(self):
         try:
@@ -136,6 +139,9 @@ class PeerConnection:
             print(f"SUCCESS! Received Block: Piece {piece_index} @ {begin_offset}")
             print(f"Data Length: {len(block_data)} bytes")
             print(f"First 20 bytes: {block_data[:20]}")
+
+            # Write to disk!
+            self.file_manager.write_block(piece_index, begin_offset, block_data)
         else:
             print(f"Received: Message ID {msg_id}")
 
@@ -167,13 +173,26 @@ class PeerConnection:
         self.sock.send(msg)
         print(f"Sent Request: Piece {piece_index}, Offset {block_offset}, Len {block_length}")
 
+# 1. Define the constants from your torrent file (Mock values for now)
+PIECE_LENGTH = 256 * 1024  # 256KB (Standard size)
+TOTAL_FILE_SIZE = PIECE_LENGTH * 8 # Let's pretend the file is 8 pieces long
+OUTPUT_FILE = "downloaded_file.dat"
+
+
 # --- Usage Mockup ---
 # To test this, you need a real Info Hash from a real .torrent file
 if __name__ == "__main__":
+
+    # Create the empty file first
+    create_empty_file(OUTPUT_FILE, TOTAL_FILE_SIZE)
+
+    # Initialize FileManager
+    file_manager = FileManager(OUTPUT_FILE, PIECE_LENGTH)
+    
     # Use the SAME Info Hash as the mock peer
     fake_info_hash = b'12345678901234567890'
     my_peer_id = b'-PC0001-999999999999'
     
     # Connect to localhost
-    peer = PeerConnection('127.0.0.1', 6881, fake_info_hash, my_peer_id)
+    peer = PeerConnection('127.0.0.1', 6881, fake_info_hash, my_peer_id, file_manager)
     peer.connect()
